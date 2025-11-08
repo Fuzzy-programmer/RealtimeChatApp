@@ -24,29 +24,28 @@ export default function Chat() {
 
   const {
     socket,
-    isConnected,
     onMessageNew,
     onUsersChanged,
     onPresenceChange,
     onTypingStart,
     onTypingStop,
+    onMessagesSeen,
   } = useSocket(username);
 
-  // 🧠 load logged-in user
+  // 🧠 Load logged-in user
   useEffect(() => {
     const stored = sessionStorage.getItem("username");
     if (stored) setUsername(stored);
     else {
-      toast.error("Please Login");
+      toast.error("Please login first");
       router.replace("/");
     }
-  }, []);
+  }, [router]);
 
-  const scrollToBottom = (smooth = true) => {
+  const scrollToBottom = (smooth = true) =>
     messagesEndRef.current?.scrollIntoView({
       behavior: smooth ? "smooth" : "auto",
     });
-  };
 
   const movePartnerToTop = (partnerUsername) => {
     setRecentUsers((prev) => {
@@ -59,14 +58,11 @@ export default function Chat() {
     });
   };
 
-  // 🧩 Fetch all users (DB)
+  // 🧩 Fetch all users
   const fetchAllUsers = async () => {
     try {
       const res = await fetch("/api/users");
-      if (res.ok) {
-        const data = await res.json();
-        setAllUsers(data || []);
-      }
+      if (res.ok) setAllUsers(await res.json());
     } catch (err) {
       console.error("fetchAllUsers error:", err);
     }
@@ -79,7 +75,7 @@ export default function Chat() {
       const res = await fetch(
         `/api/message?user1=${encodeURIComponent(username)}&recent=true`
       );
-      if (res.ok) setRecentUsers((await res.json()) || []);
+      if (res.ok) setRecentUsers(await res.json());
     } catch (err) {
       console.error("fetchRecentUsers error:", err);
     }
@@ -93,42 +89,37 @@ export default function Chat() {
     if (username) fetchRecentUsers();
   }, [username]);
 
-  // 🟢 Handle socket events
+  // 🟢 SOCKET LISTENERS
   useEffect(() => {
     if (!socket || !username) return;
 
-    // 🔄 Refresh all users when any change happens
     onUsersChanged(fetchAllUsers);
 
-    // 👥 Live presence updates
+    // 👥 Presence Updates
     onPresenceChange(({ username: u, socketId, status }) => {
-      setAllUsers((prev) => {
-        const next = prev.map((x) =>
+      setAllUsers((prev) =>
+        prev.map((x) =>
           x.username === u
-            ? {
-                ...x,
-                online: status === "online",
-                socketId: status === "online" ? socketId : null,
-              }
+            ? { ...x, online: status === "online", socketId }
             : x
-        );
-        if (!next.find((x) => x.username === u)) {
-          next.unshift({
-            username: u,
-            online: status === "online",
-            socketId: status === "online" ? socketId : null,
-          });
-        }
-        return next;
-      });
+        )
+      );
+      setRecentUsers((prev) =>
+        prev.map((x) =>
+          x.username === u
+            ? { ...x, online: status === "online", socketId }
+            : x
+        )
+      );
     });
 
-    // 💬 New message
+    // 💬 New Message Event
     onMessageNew((msg) => {
       if (msg.sender !== username && msg.receiver !== username) return;
       const partner = msg.sender === username ? msg.receiver : msg.sender;
       movePartnerToTop(partner);
 
+      // If current chat open
       if (selectedUser && partner === selectedUser.username) {
         setMessages((prev) => [
           ...prev,
@@ -141,17 +132,40 @@ export default function Chat() {
           },
         ]);
         setTimeout(() => scrollToBottom(true), 30);
+
+        // ✅ Mark message as seen
+        fetch("/api/messages/mark-seen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user1: username, user2: partner }),
+        }).catch(() => {});
       }
     });
 
-    // ✍️ Typing events
+    // ✍️ Typing Indicators
+    let typingTimeout;
     onTypingStart(({ from }) => {
-      if (from !== username) setTypingUser(from);
+      if (from !== username) {
+        setTypingUser(from);
+        clearTimeout(typingTimeout);
+      }
+    });
+    onTypingStop(({ from }) => {
+      if (from !== username) {
+        typingTimeout = setTimeout(() => setTypingUser(null), 500);
+      }
     });
 
-    onTypingStop(({ from }) => {
-      if (from !== username) setTypingUser(null);
+    // 👀 Seen Updates
+    onMessagesSeen(({ from }) => {
+      if (from === selectedUser?.username) {
+        setMessages((prev) =>
+          prev.map((m) => ({ ...m, seen: true }))
+        );
+      }
     });
+
+    return () => clearTimeout(typingTimeout);
   }, [socket, username, selectedUser]);
 
   // 🗨️ Fetch chat history
@@ -160,16 +174,27 @@ export default function Chat() {
     setLoadingMessages(true);
     setMessages([]);
     try {
-      const url = `/api/message?user1=${encodeURIComponent(
-        username
-      )}&user2=${encodeURIComponent(partner.username)}`;
-      const res = await fetch(url);
+      const res = await fetch(
+        `/api/message?user1=${encodeURIComponent(
+          username
+        )}&user2=${encodeURIComponent(partner.username)}`
+      );
       const data = res.ok ? await res.json() : [];
       setMessages(data || []);
+
+      // ✅ Mark unseen messages as seen immediately
+      await fetch("/api/messages/mark-seen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user1: username,
+          user2: partner.username,
+        }),
+      });
+
       setTimeout(() => scrollToBottom(false), 40);
     } catch (err) {
       console.error("fetchChatHistory error:", err);
-      setMessages([]);
     } finally {
       setLoadingMessages(false);
     }
@@ -181,12 +206,12 @@ export default function Chat() {
     await fetchChatHistory(user);
   };
 
-  // 📨 Send message
+  // 📨 Send Message
   const handleSend = async (text) => {
     if (!selectedUser || !text?.trim()) return;
     const trimmed = text.trim();
 
-    // optimistic bubble
+    // Optimistic update
     setMessages((prev) => [
       ...prev,
       {
@@ -209,27 +234,27 @@ export default function Chat() {
           text: trimmed,
         }),
       });
-      if (!res.ok)
-        console.error("POST /api/message failed", res.status);
+      if (!res.ok) console.error("POST /api/message failed:", res.status);
     } catch (err) {
       console.error("handleSend error:", err);
     }
   };
 
-  // 👀 Scroll down when new messages come in
+  // 👀 Auto-scroll when messages update
   useEffect(() => {
     const t = setTimeout(() => scrollToBottom(true), 40);
     return () => clearTimeout(t);
   }, [messages]);
 
+  // 🧩 Close dropdown when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setShowDropdown(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
   return (
@@ -281,7 +306,7 @@ export default function Chat() {
               </div>
             </div>
 
-            {/* CHAT AREA */}
+            {/* CHAT BODY */}
             <div className="flex-1 overflow-hidden flex flex-col">
               <div
                 ref={chatContainerRef}
@@ -310,6 +335,7 @@ export default function Chat() {
                     No messages yet. Start chatting!
                   </div>
                 )}
+
                 {typingUser === selectedUser?.username && (
                   <div className="text-gray-400 text-sm italic ml-2">
                     {selectedUser.username} is typing...

@@ -1,3 +1,4 @@
+// pages/api/message.js
 import db from "../../lib/db";
 import Message from "../../models/Message";
 import User from "../../models/Users";
@@ -16,7 +17,6 @@ export default async function handler(req, res) {
           return res.status(400).json({ message: "Missing required fields" });
         }
 
-        // Find users
         const [sender, receiver] = await Promise.all([
           User.findOne({ username: senderUsername }),
           User.findOne({ username: receiverUsername }),
@@ -26,27 +26,24 @@ export default async function handler(req, res) {
           return res.status(404).json({ message: "User not found" });
         }
 
-        // ✅ Use 'new Message' + .save() (returns a Mongoose Document)
-        const newMessage = new Message({
+        // ✅ Create and save new message
+        const newMessage = await Message.create({
           sender: sender._id,
           receiver: receiver._id,
           text: text.trim(),
           seen: false,
         });
 
-        await newMessage.save();
-
-        // ✅ Now you can safely populate
+        // ✅ Populate with usernames
         const populated = await Message.findById(newMessage._id)
           .populate("sender", "username")
           .populate("receiver", "username")
           .lean();
 
-        // 🔥 Real-time emit
+        // ✅ Real-time send to receiver
         try {
           const io = getIO();
           const receiverSid = getSocketIdByUsername(receiverUsername);
-          const senderSid = getSocketIdByUsername(senderUsername);
 
           const payload = {
             id: populated._id.toString(),
@@ -54,13 +51,14 @@ export default async function handler(req, res) {
             receiver: populated.receiver.username,
             text: populated.text,
             createdAt: populated.createdAt,
+            seen: populated.seen,
           };
-          
-        // send only to receiver — sender already added optimistically
-        if (receiverSid) io.to(receiverSid).emit("message:new", payload);
 
+          if (receiverSid) {
+            io.to(receiverSid).emit("message:new", payload);
+          }
         } catch (err) {
-          console.warn("Socket.IO emit skipped:", err.message);
+          console.warn("⚠️ Socket.IO emit skipped:", err.message);
         }
 
         return res.status(201).json({
@@ -73,12 +71,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // ✅ FETCH CHAT HISTORY / RECENTS
+    // ✅ FETCH CHAT HISTORY OR RECENT CHATS
     case "GET": {
       try {
         const { user1, user2, recent } = req.query;
 
-        // Recent chat partners
+        // --- 🕒 RECENT CHATS ---
         if (recent && user1) {
           const user = await User.findOne({ username: user1 });
           if (!user) return res.status(404).json({ message: "User not found" });
@@ -91,6 +89,7 @@ export default async function handler(req, res) {
             .sort({ updatedAt: -1 })
             .lean();
 
+          // Deduplicate chat partners
           const partners = new Map();
           for (const msg of recentMessages) {
             const partner =
@@ -100,6 +99,7 @@ export default async function handler(req, res) {
             }
           }
 
+          // Count unseen messages per partner
           const unseenCounts = await Message.aggregate([
             { $match: { receiver: user._id, seen: false } },
             { $group: { _id: "$sender", count: { $sum: 1 } } },
@@ -109,19 +109,20 @@ export default async function handler(req, res) {
             unseenCounts.map((c) => [String(c._id), c.count])
           );
 
-          const partnerList = [];
-          for (const [uname, partner] of partners.entries()) {
-            const partnerUser = await User.findOne({ username: uname }).lean();
-            partnerList.push({
-              username: uname,
-              unseen: countMap.get(String(partnerUser._id)) || 0,
-            });
-          }
+          const partnerList = await Promise.all(
+            Array.from(partners.entries()).map(async ([uname, partner]) => {
+              const partnerUser = await User.findOne({ username: uname }).lean();
+              return {
+                username: uname,
+                unseen: countMap.get(String(partnerUser?._id)) || 0,
+              };
+            })
+          );
 
           return res.status(200).json(partnerList);
         }
 
-        // Direct chat history
+        // --- 💬 DIRECT CHAT ---
         if (!user1 || !user2) {
           return res.status(400).json({ message: "Missing user parameters" });
         }
@@ -146,11 +147,27 @@ export default async function handler(req, res) {
           .sort({ createdAt: 1 })
           .lean();
 
-        // Mark unseen messages as seen
-        await Message.updateMany(
+        // ✅ Mark unseen messages as seen (userB → userA)
+        const unseenUpdate = await Message.updateMany(
           { sender: userB._id, receiver: userA._id, seen: false },
           { $set: { seen: true } }
         );
+
+        // 👀 Emit seen event to sender if online
+        if (unseenUpdate.modifiedCount > 0) {
+          try {
+            const io = getIO();
+            const senderSid = getSocketIdByUsername(user2);
+            if (senderSid) {
+              io.to(senderSid).emit("messages:seen", {
+                from: user1,
+                by: user1,
+              });
+            }
+          } catch (err) {
+            console.warn("⚠️ Socket.IO emit skipped:", err.message);
+          }
+        }
 
         return res.status(200).json(messages);
       } catch (error) {

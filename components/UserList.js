@@ -27,23 +27,21 @@ export default function UserList({
     router.replace("/");
   };
 
-  // ✅ FIXED: Close dropdown reliably on outside click
+  // ✅ Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // ✅ If click is on button → skip (prevents instant close)
+      // Ignore clicks on toggle button
       if (buttonRef.current?.contains(event.target)) return;
-
-      // ✅ If click is outside dropdown → close
+      // Close dropdown if clicked elsewhere
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setShowDropdown(false);
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 🔍 Search filtering
+  // 🔍 Search filter logic
   useEffect(() => {
     if (!searchTerm.trim()) {
       setFilteredUsers([]);
@@ -52,7 +50,7 @@ export default function UserList({
     }
 
     const regex = new RegExp(searchTerm, "i");
-    const matched = allUsers.filter((user) => regex.test(user.username));
+    const matched = allUsers.filter((u) => regex.test(u.username));
     setFilteredUsers(matched);
     setShowSuggestions(matched.length > 0);
   }, [searchTerm, allUsers]);
@@ -73,7 +71,7 @@ export default function UserList({
             {username ? username[0].toUpperCase() : "?"}
           </div>
           {username && (
-            <span className="absolute left-1/2 -translate-x-1/5 top-full mb-2 px-2 py-1 rounded bg-gray-800 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+            <span className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-2 py-1 rounded bg-gray-800 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
               {username}
             </span>
           )}
@@ -99,7 +97,7 @@ export default function UserList({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.15 }}
-                className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded shadow-lg z-20"
+                className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-20"
               >
                 <button
                   onClick={handleLogout}
@@ -127,7 +125,7 @@ export default function UserList({
           <ul className="absolute left-3 right-3 mt-1 max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg z-10">
             {filteredUsers.map((user) => (
               <li
-                key={user._id}
+                key={user._id || user.username}
                 onClick={() => handleSelectSearchUser(user)}
                 className="px-3 py-2 hover:bg-blue-100 cursor-pointer"
               >
@@ -138,7 +136,7 @@ export default function UserList({
         )}
       </div>
 
-      {/* ---------- RECENT USERS ---------- */}
+      {/* ---------- CHAT USERS ---------- */}
       <ul className="overflow-y-auto flex-1 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200">
         {users.length > 0 ? (
           users.map((user) => (
@@ -165,7 +163,7 @@ export default function UserList({
                   ></span>
                 </div>
 
-                {/* Username + Typing/Last Message */}
+                {/* Username + Typing/Last message */}
                 <div className="flex flex-col">
                   <span className="font-semibold text-gray-800 text-sm">
                     {user.username}
@@ -182,13 +180,13 @@ export default function UserList({
                 </div>
               </div>
 
-              {/* Unread badge */}
+              {/* 🔵 Unread badge */}
               {user.unseen > 0 && (
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   exit={{ scale: 0 }}
-                  className="bg-blue-500 text-white text-xs font-semibold rounded-full px-2 py-0.5 min-w-4 text-center"
+                  className="bg-blue-500 text-white text-xs font-semibold rounded-full px-2 py-0.5 min-w-[1.2rem] text-center"
                 >
                   {user.unseen > 99 ? "99+" : user.unseen}
                 </motion.span>

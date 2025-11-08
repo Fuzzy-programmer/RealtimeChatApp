@@ -7,7 +7,13 @@ import { getIO, getPresenceSnapshot } from "../../lib/socket";
 const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey123";
 
 export default async function handler(req, res) {
-  await db(); // ensure DB connection
+  try {
+    await db(); // ensure DB connection
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err);
+    return res.status(500).json({ message: "Database connection failed" });
+  }
+
   const { method } = req;
 
   switch (method) {
@@ -17,27 +23,28 @@ export default async function handler(req, res) {
     case "POST":
       try {
         const { username, password } = req.body;
-        if (!username || !password) {
+        if (!username || !password)
           return res.status(400).json({ message: "Username and password are required" });
-        }
 
-        // Check if username already exists
-        const existing = await User.findOne({ username });
-        if (existing) {
+        const existingUser = await User.findOne({ username });
+        if (existingUser)
           return res.status(400).json({ message: "Username already exists" });
-        }
 
-        // Hash password & save
-        const hashed = await bcrypt.hash(password, 10);
-        const newUser = new User({ username, password: hashed });
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = new User({
+          username: username.trim(),
+          password: hashedPassword,
+          online: false,
+          socketId: null,
+        });
         await newUser.save();
 
-        // Broadcast users:changed event
+        // Broadcast to all connected clients (update user list)
         try {
           const io = getIO();
           io.emit("users:changed");
         } catch (err) {
-          console.warn("Socket.IO not initialized yet, skipping users:changed emit");
+          console.warn("⚠️ Socket.IO not initialized yet, skipping emit");
         }
 
         return res.status(201).json({ message: "User registered successfully" });
@@ -52,22 +59,30 @@ export default async function handler(req, res) {
     case "PUT":
       try {
         const { username, password } = req.body;
-        if (!username || !password) {
+        if (!username || !password)
           return res.status(400).json({ message: "Username and password are required" });
-        }
 
         const user = await User.findOne({ username });
-        if (!user) return res.status(404).json({ message: "User not found" });
+        if (!user)
+          return res.status(404).json({ message: "User not found" });
 
-        const match = await bcrypt.compare(password, user.password);
-        if (!match) return res.status(401).json({ message: "Invalid credentials" });
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch)
+          return res.status(401).json({ message: "Invalid credentials" });
 
-        const token = jwt.sign({ id: user._id, username }, JWT_SECRET, { expiresIn: "1d" });
+        const token = jwt.sign(
+          { id: user._id, username: user.username },
+          JWT_SECRET,
+          { expiresIn: "1d" }
+        );
+
+        // ✅ Optional: mark as recently active
+        await User.findByIdAndUpdate(user._id, { lastSeen: new Date() });
 
         return res.status(200).json({
           message: "Login successful",
           token,
-          username,
+          username: user.username,
         });
       } catch (err) {
         console.error("PUT /api/users error:", err);
@@ -80,12 +95,12 @@ export default async function handler(req, res) {
     case "PATCH":
       try {
         const { username, newPassword } = req.body;
-        if (!username || !newPassword) {
+        if (!username || !newPassword)
           return res.status(400).json({ message: "Username and new password are required" });
-        }
 
         const user = await User.findOne({ username });
-        if (!user) return res.status(404).json({ message: "User not found" });
+        if (!user)
+          return res.status(404).json({ message: "User not found" });
 
         user.password = await bcrypt.hash(newPassword, 10);
         await user.save();
@@ -106,10 +121,10 @@ export default async function handler(req, res) {
           ? { username: { $regex: q, $options: "i" } }
           : {};
 
-        // Fetch users without password
+        // Fetch all users except password
         const users = await User.find(filter).select("-password").lean();
 
-        // Merge online/offline presence info from socket map
+        // Merge socket presence
         const presence = getPresenceSnapshot();
         const merged = users.map((u) => ({
           ...u,
@@ -117,15 +132,15 @@ export default async function handler(req, res) {
           socketId: presence[u.username] || null,
         }));
 
+        // Sort online users first for better UX
+        merged.sort((a, b) => b.online - a.online);
+
         return res.status(200).json(merged);
       } catch (err) {
         console.error("GET /api/users error:", err);
         return res.status(500).json({ message: "Server error" });
       }
 
-    /**
-     * 🧩 DEFAULT — Unsupported method
-     */
     default:
       res.setHeader("Allow", ["GET", "POST", "PUT", "PATCH"]);
       return res.status(405).end(`Method ${method} Not Allowed`);
