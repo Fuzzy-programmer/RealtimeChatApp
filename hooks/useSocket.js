@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
 export default function useSocket(username) {
-  const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null);
 
   // Event callback refs
@@ -16,29 +15,31 @@ export default function useSocket(username) {
   useEffect(() => {
     if (!username) return;
 
-    // 👇 Initialize socket if not already connected
+    // Initialize socket once per user session
     if (!socketRef.current) {
-      socketRef.current = io({
+      const socket = io({
         auth: { username },
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
-        timeout: 10000,
+        timeout: 15000,
       });
 
-      const socket = socketRef.current;
+      socketRef.current = socket;
 
+      // ✅ Connection established
       socket.on("connect", () => {
-        console.log("✅ Socket connected:", socket.id);
-        setIsConnected(true);
+        console.log(`✅ Connected as ${username} (${socket.id})`);
+        // Ensure server knows this user is online
+        socket.emit("presence:online", { username });
       });
 
+      // ⚠️ Handle disconnect
       socket.on("disconnect", (reason) => {
-        console.warn("⚠️ Socket disconnected:", reason);
-        setIsConnected(false);
+        console.warn(`⚠️ Disconnected: ${reason}`);
       });
 
-      // 🔄 When any user registers/logs in → update user list
+      // 🔁 When user list changes
       socket.on("users:changed", () => {
         onUsersChangedRef.current?.();
       });
@@ -48,7 +49,7 @@ export default function useSocket(username) {
         onMessageNewRef.current?.(payload);
       });
 
-      // 👥 Presence tracking
+      // 👥 Presence updates (real-time)
       socket.on("presence:online", (p) => {
         onPresenceChangeRef.current?.({ ...p, status: "online" });
       });
@@ -56,7 +57,19 @@ export default function useSocket(username) {
         onPresenceChangeRef.current?.({ ...p, status: "offline" });
       });
 
-      // ✍️ Typing indicator events
+      // 🧠 Initial presence snapshot (fix: load all users already online)
+      socket.on("presence:snapshot", (onlineUsers) => {
+        if (Array.isArray(onlineUsers)) {
+          onlineUsers.forEach((u) => {
+            onPresenceChangeRef.current?.({
+              username: u,
+              status: "online",
+            });
+          });
+        }
+      });
+
+      // ✍️ Typing indicators
       socket.on("typing:start", (data) => {
         onTypingStartRef.current?.(data);
       });
@@ -64,16 +77,16 @@ export default function useSocket(username) {
         onTypingStopRef.current?.(data);
       });
 
-      // 👀 Messages seen acknowledgment
+      // 👀 Seen message updates
       socket.on("messages:seen", (data) => {
         onMessagesSeenRef.current?.(data);
       });
     }
 
-    // Ensure socket server initialized
+    // Initialize Socket.IO API route (for Next.js)
     fetch("/api/socket").catch(() => {});
 
-    // Cleanup when component unmounts or username changes
+    // 🧹 Cleanup on unmount or username change
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
@@ -82,7 +95,7 @@ export default function useSocket(username) {
     };
   }, [username]);
 
-  // ✅ Public event subscription APIs
+  // Subscription registration
   const onUsersChanged = (cb) => { onUsersChangedRef.current = cb; };
   const onMessageNew = (cb) => { onMessageNewRef.current = cb; };
   const onPresenceChange = (cb) => { onPresenceChangeRef.current = cb; };
@@ -90,10 +103,8 @@ export default function useSocket(username) {
   const onTypingStop = (cb) => { onTypingStopRef.current = cb; };
   const onMessagesSeen = (cb) => { onMessagesSeenRef.current = cb; };
 
-  // ✅ Return socket for manual emits (e.g., typing events, seen updates)
   return {
     socket: socketRef.current,
-    isConnected,
     onUsersChanged,
     onMessageNew,
     onPresenceChange,
