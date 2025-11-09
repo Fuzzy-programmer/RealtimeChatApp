@@ -2,7 +2,7 @@
 import db from "../../lib/db";
 import Message from "../../models/Message";
 import User from "../../models/Users";
-import { getIO, getSocketIdByUsername } from "../../lib/socket";
+import { getIO, getSocketIdByUsername, getPresenceSnapshot } from "../../lib/socket";
 
 export default async function handler(req, res) {
   await db(); // ensure MongoDB connection
@@ -109,16 +109,19 @@ export default async function handler(req, res) {
             unseenCounts.map((c) => [String(c._id), c.count])
           );
 
+          const presence = getPresenceSnapshot();
+
           const partnerList = await Promise.all(
             Array.from(partners.entries()).map(async ([uname, partner]) => {
               const partnerUser = await User.findOne({ username: uname }).lean();
               return {
                 username: uname,
                 unseen: countMap.get(String(partnerUser?._id)) || 0,
+                online: !!presence[uname],
+                socketId: presence[uname] || null,
               };
             })
           );
-
           return res.status(200).json(partnerList);
         }
 

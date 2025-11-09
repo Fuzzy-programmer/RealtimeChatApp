@@ -30,6 +30,7 @@ export default function Chat() {
     onTypingStart,
     onTypingStop,
     onMessagesSeen,
+    onConnected,
   } = useSocket(username);
 
   // 🧠 Load logged-in user
@@ -95,6 +96,13 @@ export default function Chat() {
 
     onUsersChanged(fetchAllUsers);
 
+    onConnected(() => {
+      fetchAllUsers();
+      fetchRecentUsers();
+    });
+
+
+    // 👥 Presence Updates
     // 👥 Presence Updates
     onPresenceChange(({ username: u, socketId, status }) => {
       setAllUsers((prev) =>
@@ -111,16 +119,25 @@ export default function Chat() {
             : x
         )
       );
+      // Fix: Also update selectedUser if it's the user whose presence changed
+      setSelectedUser((prev) =>
+        prev && prev.username === u
+          ? { ...prev, online: status === "online", socketId }
+          : prev
+      );
     });
 
+
     // 💬 New Message Event
+    // 💬 New message event
     onMessageNew((msg) => {
       if (msg.sender !== username && msg.receiver !== username) return;
+
       const partner = msg.sender === username ? msg.receiver : msg.sender;
       movePartnerToTop(partner);
 
-      // If current chat open
       if (selectedUser && partner === selectedUser.username) {
+        // Chat is open → display immediately
         setMessages((prev) => [
           ...prev,
           {
@@ -128,19 +145,37 @@ export default function Chat() {
             receiver: { username: msg.receiver },
             text: msg.text,
             createdAt: msg.createdAt,
-            seen: msg.seen,
+            seen: true, // 🔥 mark as seen immediately on arrival
           },
         ]);
-        setTimeout(() => scrollToBottom(true), 30);
 
-        // ✅ Mark message as seen
+        // 👀 Mark as seen on sender's side via socket
+        socket?.emit("messages:seen", {
+          from: msg.sender,
+          by: username,
+        });
+
+        // And in DB
         fetch("/api/messages/mark-seen", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user1: username, user2: partner }),
-        }).catch(() => {});
+          body: JSON.stringify({
+            user1: username,
+            user2: msg.sender,
+          }),
+        }).catch(console.error);
+
+        setTimeout(() => scrollToBottom(true), 30);
+      } else {
+        // Chat closed → increment unread count
+        setRecentUsers((prev) =>
+          prev.map((u) =>
+            u.username === partner ? { ...u, unseen: (u.unseen || 0) + 1 } : u
+          )
+        );
       }
     });
+
 
     // ✍️ Typing Indicators
     let typingTimeout;
@@ -200,11 +235,43 @@ export default function Chat() {
     }
   };
 
+  // 👆 When selecting a chat user
   const handleSelectUser = async (user) => {
+    if (!user) return;
     setSelectedUser(user);
     setTypingUser(null);
+
+    // 🧹 1️⃣ Locally clear unread count immediately
+    setRecentUsers((prev) =>
+      prev.map((u) =>
+        u.username === user.username ? { ...u, unseen: 0 } : u
+      )
+    );
+
+    // 👀 2️⃣ Mark unseen messages in DB as seen
+    try {
+      await fetch("/api/messages/mark-seen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user1: username,         // viewer
+          user2: user.username,    // chat partner
+        }),
+      });
+
+      // 🔥 3️⃣ Emit real-time 'messages:seen' to the sender
+      socket?.emit("messages:seen", {
+        from: user.username, // sender
+        by: username,         // viewer (you)
+      });
+    } catch (err) {
+      console.error("mark-seen failed:", err);
+    }
+
+    // 🗨️ 4️⃣ Fetch chat history (includes updated 'seen' status)
     await fetchChatHistory(user);
   };
+
 
   // 📨 Send Message
   const handleSend = async (text) => {

@@ -11,6 +11,7 @@ export default function useSocket(username) {
   const onTypingStartRef = useRef(null);
   const onTypingStopRef = useRef(null);
   const onMessagesSeenRef = useRef(null);
+  const onConnectedRef = useRef(null);
 
   useEffect(() => {
     if (!username) return;
@@ -32,6 +33,7 @@ export default function useSocket(username) {
         console.log(`✅ Connected as ${username} (${socket.id})`);
         // Ensure server knows this user is online
         socket.emit("presence:online", { username });
+        onConnectedRef.current?.();
       });
 
       // ⚠️ Handle disconnect
@@ -102,6 +104,7 @@ export default function useSocket(username) {
   const onTypingStart = (cb) => { onTypingStartRef.current = cb; };
   const onTypingStop = (cb) => { onTypingStopRef.current = cb; };
   const onMessagesSeen = (cb) => { onMessagesSeenRef.current = cb; };
+  const onConnected = (cb) => { onConnectedRef.current = cb; };
 
   return {
     socket: socketRef.current,
@@ -111,5 +114,6 @@ export default function useSocket(username) {
     onTypingStart,
     onTypingStop,
     onMessagesSeen,
+    onConnected,
   };
 }
