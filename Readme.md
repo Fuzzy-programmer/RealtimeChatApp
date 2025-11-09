@@ -49,7 +49,8 @@ JWT_SECRET={your-very-secure-secret}
 
 ### 4️⃣ Run in development
 ```bash
-npm run dev
+npm run build
+npm start
 ```
 
 ### 5️⃣ Open in browser
@@ -78,8 +79,6 @@ chat-app/
 ├── package.json              # Project metadata and dependencies
 ├── next.config.js            # Next.js configuration
 ├── .env.local                # Environment variables (MongoDB URI, PORT, secrets)
-├── public/                   # Static files (images, icons, etc.)
-│   └── favicon.ico
 ├── styles/                   # CSS or global styles
 │   └── globals.css
 ├── lib/                      # Helper modules
@@ -87,14 +86,16 @@ chat-app/
 │   └── socket.js             # Socket.io server logic
 ├── models/
 │   ├── User.js               # UserSchema from mongodb
-│   └── Message.js 	      # MessageSchema from mongodb
+│   └── Message.js 	          # MessageSchema from mongodb
 ├── pages/                    # Next.js pages (frontend + backend API)
-|   ├── _app.js		      # Apply global css to all the pages
+|   ├── _app.js		          # Apply global css to all the pages
 │   ├── index.js              # Homepage / login page
 │   ├── chat.js               # Chat UI page (frontend)
-|   ├── register.js	      # Register a new user
+|   ├── register.js	          # Register a new user
 |   ├── forgot_password.js    # Forgot Password
 │   └── api/                  # Backend API routes
+|       ├─ messages/          # Message Seen/Unseen feature
+|       |    └─ mark-seen.js
 │       ├── users.js          # User signup/login API
 │       ├── messages.js       # Fetch/save chat messages API
 │       └── socket.js         # API route for Socket.io server (development)
@@ -104,7 +105,7 @@ chat-app/
 │   └── UserList.js
 ├── hooks/                    # React custom hooks
 │   └── useSocket.js          # Hook for Socket.io client connection
-├── public/                    #public module for app interface images
+├── public/                   #public module for app interface images
 │   └── screenshots/
 |       ├── MessageBubble.js
 │       ├── ChatInput.js
