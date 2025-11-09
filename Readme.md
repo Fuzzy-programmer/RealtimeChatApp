@@ -31,6 +31,7 @@ git clone https://github.com/MTech-IT-MNS-2025/Group-3.git
 cd Assignment_3
 ```
 ### 2️⃣ Install dependencies
+
 ```bash
 npm install
 ```
@@ -105,7 +106,7 @@ chat-app/
 │   └── UserList.js
 ├── hooks/                    # React custom hooks
 │   └── useSocket.js          # Hook for Socket.io client connection
-├── public/                   #public module for app interface images
+├── public/                   # Public module for app interface images
 │   └── screenshots/
 |       ├── MessageBubble.js
 │       ├── ChatInput.js
@@ -118,7 +119,7 @@ chat-app/
 | Category       | Technology                          | Purpose                 |
 | -------------- | ----------------------------------- | ----------------------- |
 | **Frontend**   | Next.js (React + SSR)               | UI, routing, APIs       |
-| **Backend**    | Node.js + Express (Next API Routes) | REST API endpoints      |
+| **Backend**    | Node.js                             | REST API endpoints      |
 | **Database**   | MongoDB + Mongoose                  | User & message storage  |
 | **Real-time**  | Socket.io                           | Real-time communication |
 | **Auth**       | JWT (JSON Web Tokens)               | Authentication          |
@@ -139,6 +140,6 @@ Through this project, you will learn:
 
 ## 📜 License
 This project is licensed under the MIT License.  
-See the [LICENSE](../LICENSE) file for details.
+See the [LICENSE](LICENSE) file for details.
 
 ---
